@@ -1,0 +1,324 @@
+name: Release Triple Triad Autopilot
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  # Manual fallback: when auto-tag pushes a tag via GITHUB_TOKEN, GitHub
+  # sometimes refuses to cascade-trigger this workflow. Dispatch on the tag
+  # ref to publish the release without having to delete and re-push the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.0.0.0). Defaults to the ref this is dispatched on.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    outputs:
+      target: ${{ steps.tag.outputs.target }}
+
+    steps:
+      - name: Resolve target tag
+        id: tag
+        shell: bash
+        run: |
+          ref_name="${{ github.ref_name }}"
+          input_tag="${{ inputs.tag }}"
+          if [ -n "$input_tag" ]; then
+            target="$input_tag"
+          else
+            target="$ref_name"
+          fi
+          if [[ ! "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::Resolved target '$target' is not a v*.*.* tag — pass the tag input or dispatch on a tag ref."
+            exit 1
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "version=${target#v}" >> "$GITHUB_OUTPUT"
+          echo "Releasing $target"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.tag.outputs.target }}
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Dalamud dev build
+        shell: pwsh
+        run: |
+          $dalamudUrl = "https://goatcorp.github.io/dalamud-distrib/latest.zip"
+          $dalamudDir = "$env:AppData\XIVLauncher\addon\Hooks\dev"
+          New-Item -ItemType Directory -Force -Path $dalamudDir | Out-Null
+          Invoke-WebRequest -Uri $dalamudUrl -OutFile dalamud.zip
+          Expand-Archive -Path dalamud.zip -DestinationPath $dalamudDir -Force
+          Remove-Item dalamud.zip
+
+      - name: Build (Release)
+        run: dotnet build AutoTripleTriadGrind.sln --configuration Release
+
+      - name: Stage latest.zip
+        shell: pwsh
+        run: |
+          $src = 'AutoTripleTriadGrind/bin/Release/TripleTriadAutopilot/latest.zip'
+          if (-not (Test-Path $src)) { throw "SDK-built plugin zip not found at $src" }
+          Copy-Item $src 'latest.zip' -Force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.target }}
+          name: ${{ steps.tag.outputs.target }}
+          files: latest.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Fetch total download count
+        id: count
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          total=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq '[.[].assets[].download_count] | add // 0')
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "Total downloads across all releases: $total"
+
+      - name: Announce the release on Discord
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WEBHOOK_URL: ${{ secrets.RELEASE_WEBHOOK_URL }}
+          PING_ROLE_ID: ${{ vars.RELEASE_PING_ROLE_ID }}
+          TAG: ${{ steps.tag.outputs.target }}
+          DOWNLOADS: ${{ steps.count.outputs.total }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WEBHOOK_URL)) {
+            Write-Host 'RELEASE_WEBHOOK_URL not set; skipping the announcement.'
+            exit 0
+          }
+
+          $plugin  = 'Triple Triad Autopilot'
+          $icon    = "https://raw.githubusercontent.com/$($env:GH_REPO)/master/AutoTripleTriadGrind/Images/Icon.png"
+          $relList = "https://github.com/$($env:GH_REPO)/releases"
+
+          $rel = gh release view $env:TAG --json name,tagName,body,url,isPrerelease,publishedAt | ConvertFrom-Json
+
+          $title = if ([string]::IsNullOrEmpty($rel.name)) { $rel.tagName } else { $rel.name }
+
+          # Highlights come from the in-plugin changelog: ChangelogData.cs maps the version to an
+          # L.Changelog array, whose English source strings become the bullet list.
+          $version       = $rel.tagName.TrimStart('v')
+          $changelogData = Get-Content -Raw -Path 'AutoTripleTriadGrind/Core/Changelog/ChangelogData.cs'
+          $localization  = Get-Content -Raw -Path 'AutoTripleTriadGrind/Core/Localization/L.cs'
+          $highlights    = [System.Collections.Generic.List[string]]::new()
+          $entry = [regex]::Match($changelogData, 'new(?:\s+ChangelogEntry)?\("' + [regex]::Escape($version) + '",\s*"[^"]*",\s*L\.Changelog\.(\w+)\)')
+          if ($entry.Success) {
+            $block = [regex]::Match($localization, 'LocString\[\]\s+' + $entry.Groups[1].Value + '\s*=\s*(?:new\s+LocString\[\d*\]\s*\{|\[)(.*?)(?:\}|\]);', 'Singleline')
+            foreach ($line in [regex]::Matches($block.Groups[1].Value, 'new(?:\s+LocString)?\("[^"]*",\s*"(.*?)"\)')) {
+              $highlights.Add('• ' + [regex]::Unescape($line.Groups[1].Value))
+            }
+          }
+
+          if ($highlights.Count -gt 0) {
+            $desc = $highlights -join "`n"
+          } else {
+            Write-Host "::warning::No changelog entry for $version in ChangelogData.cs; falling back to the GitHub release notes."
+            $desc = if ($null -eq $rel.body) { '' } else { [string]$rel.body }
+          }
+          $desc = $desc.Replace("`r", '').Replace([char]0x2014, '-').Replace([char]0x2013, '-')
+          if ($desc.Length -gt 3800) { $desc = $desc.Substring(0, 3800) + "`n`n...full notes on GitHub" }
+
+          $isPre   = [bool]$rel.isPrerelease
+          $content = if ($isPre) { '🧪 **New preview build just dropped!**' } else { '🚀 **New version dropped!**' }
+          $pingRole = $env:PING_ROLE_ID
+          if (-not [string]::IsNullOrWhiteSpace($pingRole)) {
+            $content = "<@&$pingRole> $content"
+          }
+          $color   = if ($isPre) { 10197915 } else { 9132790 }
+          $channel = if ($isPre) { 'Preview' } else { 'Stable' }
+
+          $fields = @(
+            [ordered]@{ name = 'Version'; value = '`' + $rel.tagName + '`'; inline = $true }
+            [ordered]@{ name = 'Channel'; value = $channel; inline = $true }
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:DOWNLOADS)) {
+            $fields += [ordered]@{ name = 'Total installs'; value = "$($env:DOWNLOADS)"; inline = $true }
+          }
+
+          $payload = [ordered]@{
+            username   = $plugin
+            avatar_url = $icon
+            content    = $content
+            embeds     = @(
+              [ordered]@{
+                author      = [ordered]@{ name = $plugin; url = $relList; icon_url = $icon }
+                title       = $title
+                url         = $rel.url
+                description = $desc
+                color       = $color
+                fields      = $fields
+                thumbnail   = [ordered]@{ url = $icon }
+                footer      = [ordered]@{ text = $plugin; icon_url = $icon }
+                timestamp   = $rel.publishedAt
+              }
+            )
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($pingRole)) {
+            $payload['allowed_mentions'] = [ordered]@{ roles = @($pingRole) }
+          }
+
+          $json = $payload | ConvertTo-Json -Depth 10
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          $resp  = Invoke-WebRequest -Uri $env:WEBHOOK_URL -Method Post -Body $bytes -ContentType 'application/json; charset=utf-8' -UseBasicParsing
+          Write-Host "Discord responded: $($resp.StatusCode) $($resp.StatusDescription) for $($env:TAG)"
+
+      - name: Update local repo.json
+        shell: pwsh
+        run: |
+          $v = '${{ steps.tag.outputs.version }}'
+          $path = 'repo.json'
+          $json = Get-Content -Raw -Path $path | ConvertFrom-Json
+          $json[0].AssemblyVersion = $v
+          $json[0].TestingAssemblyVersion = $v
+          $json[0].DownloadCount = [int]'${{ steps.count.outputs.total }}'
+          $json[0] | Add-Member -NotePropertyName 'LastUpdate' -NotePropertyValue ([string][int][double]::Parse((Get-Date -UFormat %s))) -Force
+          # -AsArray preserves the array wrapper; piping a single-element array through | unrolls it and loses the [ ... ] Dalamud requires.
+          ConvertTo-Json -InputObject $json -Depth 10 -AsArray | Set-Content -Path $path -Encoding utf8
+
+      - name: Commit local repo.json
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add repo.json
+          if (-not (git status --porcelain)) {
+            Write-Host 'No changes to commit.'
+            exit 0
+          }
+          git commit -m "Release ${{ steps.tag.outputs.target }}: bump repo.json"
+          # -X theirs auto-resolves any repo.json conflict in favour of our just-bumped values
+          # (rebase semantics: "theirs" = the commits being rebased, i.e. ours).
+          # Without it, a concurrent push that touched repo.json leaves conflict markers,
+          # push then reports "Everything up-to-date" with exit 0, and downstream steps
+          # silently consume the corrupted file.
+          for ($i = 1; $i -le 5; $i++) {
+            git fetch origin master
+            git rebase -X theirs origin/master
+            if ($LASTEXITCODE -ne 0) {
+              git rebase --abort 2>$null
+              Write-Host "Rebase failed (attempt $i); retrying..."
+              Start-Sleep -Seconds 2
+              continue
+            }
+            git push origin HEAD:master
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Push rejected (attempt $i); retrying after rebase..."
+            Start-Sleep -Seconds 2
+          }
+          Write-Error 'Failed to push repo.json bump after 5 attempts.'
+          exit 1
+
+      # Publish to the Sojiroh custom Dalamud repository (served by GitHub Pages as
+      # pluginmaster.json). Store metadata comes from the repo.json bumped above;
+      # CUSTOM_REPO_TOKEN needs contents:write on Sojiroh/SojirohPlugins.
+      - name: Checkout custom plugin repository
+        uses: actions/checkout@v7
+        with:
+          repository: Sojiroh/SojirohPlugins
+          token: ${{ secrets.CUSTOM_REPO_TOKEN }}
+          path: custom-repository
+
+      - name: Update custom repository entry
+        shell: pwsh
+        env:
+          PLUGIN_VERSION: ${{ steps.tag.outputs.version }}
+          TAG_NAME: ${{ steps.tag.outputs.target }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          $meta = @(Get-Content -Raw -Path 'repo.json' | ConvertFrom-Json)[0]
+          $assetUrl = "https://github.com/$env:SOURCE_REPOSITORY/releases/download/$env:TAG_NAME/latest.zip"
+
+          $entry = [ordered]@{
+            Author              = $meta.Author
+            Name                = $meta.Name
+            InternalName        = $meta.InternalName
+            AssemblyVersion     = $env:PLUGIN_VERSION
+            RepoUrl             = $meta.RepoUrl
+            ApplicableVersion   = $meta.ApplicableVersion
+            DalamudApiLevel     = [int]$meta.DalamudApiLevel
+            Punchline           = $meta.Punchline
+            Description         = $meta.Description
+            IconUrl             = $meta.IconUrl
+            IsHide              = $false
+            IsTestingExclusive  = $false
+            DownloadLinkInstall = $assetUrl
+            DownloadLinkUpdate  = $assetUrl
+            DownloadCount       = [int]$meta.DownloadCount
+            LastUpdate          = [long]$meta.LastUpdate
+            Tags                = @($meta.Tags)
+            CategoryTags        = @($meta.CategoryTags)
+          }
+
+          $entryFile = "entries\$($meta.InternalName).json"
+          New-Item -ItemType Directory -Force -Path .\custom-repository\entries | Out-Null
+          $entry | ConvertTo-Json -Depth 10 | Set-Content ".\custom-repository\$entryFile" -Encoding utf8
+
+          Push-Location .\custom-repository
+          node .\scripts\generate-pluginmaster.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'generate-pluginmaster.mjs failed.' }
+
+          git add $entryFile pluginmaster.json
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host 'Custom repository metadata is already up to date.'
+          } else {
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Update $($meta.InternalName) to $env:PLUGIN_VERSION"
+
+            $pushed = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              git push
+              if ($LASTEXITCODE -eq 0) {
+                $pushed = $true
+                break
+              }
+
+              Write-Warning "Push attempt $attempt failed; rebasing on origin/main before retry."
+              git pull --rebase origin main
+              if ($LASTEXITCODE -ne 0) {
+                throw 'Failed to rebase custom repository before retry.'
+              }
+            }
+
+            if (-not $pushed) {
+              throw 'Failed to push custom repository metadata after 3 attempts.'
+            }
+          }
+          Pop-Location
+
+  # Called rather than left to `release: published`, which never fires for a release
+  # published with GITHUB_TOKEN. Runs after the repo.json bump so both pushes to master
+  # are sequential.
+  update-issue-templates:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/update-issue-template-versions.yml
+    with:
+      version: ${{ needs.release.outputs.target }}

@@ -1,0 +1,119 @@
+using System;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
+using AutoTripleTriadGrind.Core.Ipc;
+using Dalamud.Plugin.Services;
+
+namespace AutoTripleTriadGrind.Core.Tasks;
+
+public abstract partial class AutoCommon
+{
+    private const int DelayPollFrames = 2;
+
+    private const int WaitPollFrames = 30;
+
+    private const int NavmeshPollFrames = 120;
+
+    protected void Diag(string message, [CallerFilePath] string callerFile = "")
+    {
+        RunLog.Info(message, callerFile);
+    }
+
+    protected void Warn(string message, [CallerFilePath] string callerFile = "")
+    {
+        RunLog.Warning(message, callerFile);
+    }
+
+    protected new async Task DelayMs(int milliseconds)
+    {
+        var deadline = Environment.TickCount64 + milliseconds;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (CancelToken.IsCancellationRequested)
+            {
+                return;
+            }
+            await NextFrame(DelayPollFrames);
+        }
+    }
+
+    protected async Task RunWithStatusPinned(string label, Func<Task> work)
+    {
+        Status = label;
+        IFramework.OnUpdateDelegate pin = _ =>
+        {
+            Status = label;
+        };
+        ECommons.DalamudServices.Svc.Framework.Update += pin;
+        try
+        {
+            await work();
+        }
+        finally
+        {
+            ECommons.DalamudServices.Svc.Framework.Update -= pin;
+        }
+    }
+
+    protected async Task<bool> WaitUntilTimed(Func<bool> condition, int timeoutMs, string scope, int checkFrames = WaitPollFrames)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        var threw = false;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (CancelToken.IsCancellationRequested)
+            {
+                return false;
+            }
+            if (ConditionHolds(condition, scope, ref threw))
+            {
+                return true;
+            }
+            await NextFrame(checkFrames);
+        }
+        Diag($"WAIT TIMEOUT: '{scope}' not satisfied within {timeoutMs / 1000}s");
+        return false;
+    }
+
+    protected async Task WaitForNavmeshReady(int timeoutMs, int pollFrames = NavmeshPollFrames)
+    {
+        var navmesh = NavmeshIPC.Instance;
+        if (navmesh.IsReady())
+        {
+            return;
+        }
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (!navmesh.IsReady())
+        {
+            if (CancelToken.IsCancellationRequested)
+            {
+                return;
+            }
+            if (Environment.TickCount64 >= deadline)
+            {
+                Diag($"WAIT TIMEOUT: navmesh not ready within {timeoutMs / 1000}s; proceeding anyway");
+                return;
+            }
+            var progress = navmesh.BuildProgress();
+            Status = ((progress >= 0f && progress <= 1f) ? $"Please wait, the navmesh is loading ({progress * 100f:F0}%)" : "Please wait, the navmesh is loading…");
+            await NextFrame(pollFrames);
+        }
+    }
+
+    private bool ConditionHolds(Func<bool> condition, string scope, ref bool threw)
+    {
+        try
+        {
+            return condition();
+        }
+        catch (Exception ex)
+        {
+            if (!threw)
+            {
+                Warn("WaitUntilTimed '" + scope + "' condition threw (treating as unsatisfied; will retry until timeout): " + ex.Message);
+                threw = true;
+            }
+            return false;
+        }
+    }
+}

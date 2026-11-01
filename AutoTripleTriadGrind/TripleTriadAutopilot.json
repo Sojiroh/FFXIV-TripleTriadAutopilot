@@ -1,0 +1,18 @@
+{
+  "Author": "Sojiroh",
+  "Name": "Triple Triad Autopilot",
+  "InternalName": "TripleTriadAutopilot",
+  "Punchline": "Every NPC card, collected for you.",
+  "Description": "Collects every Triple Triad card NPCs can give you: pick the cards you are missing, and the plugin travels to each NPC, builds a deck for its rules, plays until your cards drop, registers them, and moves on. Based on Auto Triple Triad Grind by XeldarAlz.",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/Sojiroh/FFXIV-TripleTriadAutopilot",
+  "IconUrl": "https://raw.githubusercontent.com/Sojiroh/FFXIV-TripleTriadAutopilot/master/AutoTripleTriadGrind/Images/Icon.png",
+  "Tags": [
+    "Triple Triad",
+    "Cards",
+    "Gold Saucer",
+    "MGP",
+    "Collection",
+    "Automation"
+  ]
+}

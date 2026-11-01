@@ -1,0 +1,105 @@
+name: Bug report
+description: Something's broken or behaving unexpectedly.
+title: "[Bug] "
+labels: ["bug"]
+assignees: ["Sojiroh"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill out as much as you can; it makes a huge difference.
+
+        If you're not sure whether it's a bug or expected behavior, prefer [Help & troubleshooting discussions](https://github.com/Sojiroh/FFXIV-TripleTriadAutopilot/discussions/new?category=help-troubleshooting); triage is faster there.
+
+        For security issues, please use [private vulnerability reporting](https://github.com/Sojiroh/FFXIV-TripleTriadAutopilot/security/advisories/new) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see? What did you expect to see instead?
+      placeholder: "The run stopped at an NPC and never played / the deck it built lost every match / a card was won but never registered / it walked into a wall on the way to an NPC..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the bug. If it's intermittent, say so.
+      placeholder: |
+        1. Open `/tta`
+        2. Tick the cards or NPCs you want, or switch to Farm mode
+        3. Press Start
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Shown in `/xlplugins` next to "Triple Triad Autopilot".
+      options:
+        - 1.3.1.0
+        - Older / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: npc
+    attributes:
+      label: NPC and zone (if it involves one)
+      description: The NPC the run was on when it went wrong, and the zone it is in.
+      placeholder: "Momodi in Ul'dah - Steps of Nald, ..."
+
+  - type: input
+    id: client-language
+    attributes:
+      label: Game client language
+      description: Card, NPC and zone names follow your game client, so the client language matters.
+      placeholder: "English, Japanese, German, French, ..."
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did it fail?
+      description: A run plans the NPCs for your picks, travels to each one, challenges it, builds a deck for its rules, plays the match, registers the cards it wins, and moves on; the after-run action then runs.
+      options:
+        - Planning (wrong NPC order, an NPC shown as locked or unreachable)
+        - Travel (teleport, flying, navmesh, entrances into a zone)
+        - Talking to the NPC (challenge menu, quest offers, dialogs)
+        - Deck building (optimized deck, rules, deck selection)
+        - Playing the match (reading the board, wrong card played, stalled turn)
+        - Registering cards (won cards left in the bags)
+        - After-run action / post-run commands
+        - Selection / UI (window, settings, themes, languages)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Attachments
+      description: |
+        **If you can provide any of these, it turns guesswork into a fix.**
+
+        - **Plugin console**: open `/tta log`, press *Copy log* and paste the result into the console field below. It already includes the plugin version, Dalamud version and zone.
+        - **Dalamud log**: open `/xllog`, click the *Open log folder* button at the bottom-right, attach `dalamud.log`. Filter by `[TTA]` if you want to trim it down.
+        - **Screenshots / short clip** if the issue is visual.
+        - **Other plugins active** that touch teleporting, pathfinding, flying or the Gold Saucer — helps rule out conflicts.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output (optional)
+      description: |
+        Paste what *Copy log* on the plugin's Console page (`/tta log`) put on your clipboard. Short snippets (chat-log tail, Dalamud error text) also belong here; attach full `dalamud.log` files under **Attachments** above.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Deck optimizer and play settings, which NPCs were picked, anything that helps the bug land.

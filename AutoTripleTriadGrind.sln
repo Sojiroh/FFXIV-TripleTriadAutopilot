@@ -1,0 +1,22 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoTripleTriadGrind", "AutoTripleTriadGrind\AutoTripleTriadGrind.csproj", "{43283C90-FEDE-41BE-B4D6-4954CEEF1F41}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ECommons", "ECommons\ECommons\ECommons.csproj", "{82AC264D-3200-40AB-9281-E1F991B08CA1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{43283C90-FEDE-41BE-B4D6-4954CEEF1F41}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{43283C90-FEDE-41BE-B4D6-4954CEEF1F41}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{43283C90-FEDE-41BE-B4D6-4954CEEF1F41}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{43283C90-FEDE-41BE-B4D6-4954CEEF1F41}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82AC264D-3200-40AB-9281-E1F991B08CA1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82AC264D-3200-40AB-9281-E1F991B08CA1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82AC264D-3200-40AB-9281-E1F991B08CA1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82AC264D-3200-40AB-9281-E1F991B08CA1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
